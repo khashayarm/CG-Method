@@ -1,0 +1,85 @@
+###### Lammps Input File			Summer 2018
+###### AKA Group
+####################################################################################
+
+###### Variables Needed for Run
+
+variable			Temp1		equal	300
+variable			Temp2		equal	400
+
+# Size variables
+variable            SizeX       equal   200
+variable            SizeZ       equal   10
+variable            SizeY2      equal   301
+variable            SizeY1      equal   ${SizeY2}-31
+
+
+# General
+variable            CG          equal   2
+variable			Mass		equal	28.0855*${CG}^2
+variable			CellSize	equal	5.4307*${CG}
+variable            AtomVolume  equal   (${CellSize}^3)/8
+
+# Loading
+variable            RunValue    equal   50000
+
+# Dump
+variable            ThermoValue equal   ${RunValue}/200
+variable            DumpValue   equal   ${RunValue}/100
+
+###### Initializations
+units				metal
+dimension			3
+boundary			s s s
+atom_style			atomic
+#atom_modify         map yes
+##################################### Main Code #####################################
+
+###### Create Atoms
+box					tilt large
+lattice				diamond ${CellSize}
+region				MainRegion prism -5 +5 -2 +2 -2 +2 0.0 0.0 0.0 units lattice
+create_box			1 MainRegion
+create_atoms		1 box
+
+###### Regions and Groups
+region              BotReg block -6 -4 -3 +3 -3 +3 units lattice
+region              TopReg block +4 +6 -3 +3 -3 +3 units lattice
+region              BodyReg block -3.99 +3.99 -3 +3 -3 +3 units lattice
+group               BotGP region BotReg
+group               TopGP region TopReg
+group               BodyGP region BodyReg
+
+
+###### Potential
+mass				* ${Mass}
+pair_style			tersoff
+pair_coeff			* * Si8.tersoff Si
+
+
+###### Fixes and Computes
+velocity            all create 350 12345 mom yes rot yes dist gaussian
+variable            Counter equal   step
+
+fix					NVEFix BodyGP nve
+fix                 BotFix BotGP nvt temp ${Temp1} ${Temp1} 0.1
+fix_modify          BotFix energy yes
+fix                 TopFix TopGP nvt temp ${Temp2} ${Temp2} 0.1
+fix_modify          TopFix energy yes
+
+compute             PE all pe
+variable            PE equal c_PE
+
+compute             BodyTemp BodyGP temp
+variable            BodyTemp equal c_BodyTemp
+compute             TopTemp TopGP temp
+variable            TopTemp equal c_TopTemp
+compute             BotTemp BotGP temp
+variable            BotTemp equal c_BotTemp
+###### Dump and Thermo and Run
+fix					FixPrint all print ${ThermoValue} "${Counter} ${PE} ${BotTemp} ${BodyTemp} ${TopTemp}" &
+                    file Stress.dat screen yes title "Step Displacement Force ::: A - eV/A"
+
+dump				DumpFile all custom ${DumpValue} dump.Lammps type x y z
+
+run                 ${RunValue}

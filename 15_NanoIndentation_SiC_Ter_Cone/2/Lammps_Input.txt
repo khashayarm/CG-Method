@@ -1,0 +1,133 @@
+###### Lammps Input File			Summer 2018
+###### AKA Group
+####################################################################################
+
+###### Variables Needed for Run
+
+variable			Temp		equal	300
+
+# Size variables
+# General
+variable            CG          equal   2
+variable			CellSize1	equal	5.43*${CG}
+variable            CellSize2   equal   3.2*${CG}
+variable			MassC		equal	12.011*${CG}^3
+variable            MassSi      equal   28.086*${CG}^3
+variable            AtomVolume  equal   (${CellSize1}^3)/8
+variable            ThermoValue equal   90
+variable            DumpValue   equal   900
+
+# Loading
+variable            LoadSpeed   equal   1
+variable            MaxDisp     equal   45
+variable            HalfStep    equal   ${MaxDisp}*1000/${LoadSpeed}
+variable            RelaxSteps  equal   10000
+
+# Substrate
+variable            SizeX_1     equal   30/${CG}
+variable            SizeY_1     equal   30/${CG}
+variable            SizeZ_1     equal   12/${CG}
+
+# Cylinder
+#variable            C1_2        equal   (${SizeX_1}/2)*${CellSize1} # 10/${CG}
+#variable            C2_2        equal   (${SizeY_1}/2)*${CellSize1} # 10/${CG}
+#variable            Radius_2    equal   (5/${CG})*${CellSize2}
+#variable            Lo_2        equal   (30.25/${CG})*${CellSize2}
+#variable            Hi_2        equal   (32/${CG})*${CellSize2}
+
+# Cone
+variable            C1_3        equal   (${SizeX_1}/2)*${CellSize1} # 10/${CG}
+variable            C2_3        equal   (${SizeY_1}/2)*${CellSize1} # 10/${CG}
+variable            Radlo_3     equal   (2/${CG})*${CellSize2}
+variable            Radhi_3     equal   (10/${CG})*${CellSize2}
+variable            Lo_3        equal   (24/${CG})*${CellSize2}
+variable            Hi_3        equal   (38/${CG})*${CellSize2}
+
+# Minimize variables
+variable			etol		equal	1e-20
+variable			ftol		equal	1e-20
+variable			maxiter		equal	2e+4
+variable			maxeval		equal	2e+4
+
+##################################### Main Code #####################################
+
+###### Initializations
+units				metal
+dimension			3
+boundary			p p s
+atom_style			atomic
+
+###### Create Atoms
+box					tilt large
+
+# Substrate
+lattice				diamond ${CellSize1}
+region              BOX block 0 ${SizeX_1} 0 ${SizeY_1} 0 32 units lattice
+region              Substrate block 0 ${SizeX_1} 0 ${SizeY_1} 0 ${SizeZ_1} units lattice
+region              BotRegion block 0  ${SizeX_1} 0 ${SizeY_1} 0 1 units lattice
+create_box          2 BOX
+create_atoms        1 region Substrate
+
+# Indent
+lattice				diamond ${CellSize2}
+#region              Solid1 cylinder z ${C1_2} ${C2_2} ${Radius_2} ${Lo_2} ${Hi_2} units box
+region              Solid2 cone z ${C1_3} ${C2_3} ${Radlo_3} ${Radhi_3} ${Lo_3} ${Hi_3} units box
+#create_atoms        2 region Solid1
+create_atoms        2 region Solid2
+
+group               Indent type 2
+group               Substrate type 1
+group               BotGroup region BotRegion
+
+###### Potential
+mass				1 ${MassSi}
+mass                2 ${MassC}
+pair_style			tersoff
+pair_coeff			* * SiC8.tersoff Si C
+
+###### Minimization
+#min_style			quickmin
+#minimize			${etol} ${ftol} ${maxiter} ${maxeval}
+
+###### Initil Velocity
+velocity			Substrate create ${Temp} 123456 rot yes mom yes dist gaussian
+
+###### Fixes
+fix					NVTFix all nvt temp ${Temp} ${Temp} 0.1
+
+variable            C equal step
+variable            C equal $C
+variable            Counter     equal   step-${C}
+fix                 IndentMove Indent move linear 0 0 -${LoadSpeed} units box
+fix					FixBot BotGroup move linear 0 0 0 units box
+
+
+###### Computes
+variable			Displacement	equal	v_Counter*0.001*${LoadSpeed}
+
+compute				IndentForce Indent reduce sum fz
+variable			IndentForce		equal	c_IndentForce
+
+# Stress vectors
+compute				SPA all stress/atom NULL
+variable			SPAV1			atom	c_SPA[1]/(${AtomVolume}*10000)
+variable			SPAV2			atom	c_SPA[2]/(${AtomVolume}*10000)
+variable			SPAV3			atom	c_SPA[3]/(${AtomVolume}*10000)
+
+###### Dump and Thermo and Run
+fix					FixPrint all print ${ThermoValue} "${Counter} ${Displacement} ${IndentForce}" &
+                    file Stress.dat screen yes title "Step Displacement IndentForce ::: A - eV/A"
+
+dump				DumpFile all custom ${DumpValue} dump.Lammps type x y z v_SPAV1 v_SPAV2 v_SPAV3
+
+run                 ${HalfStep}
+
+###### Relaxation
+fix                 IndentMove Indent move linear 0 0 0 units box
+variable			Displacement	equal	0
+run                 ${RelaxSteps} pre no
+
+###### Ejection
+fix                 IndentMove Indent move linear 0 0 ${LoadSpeed} units box
+variable			Displacement	equal	(2*${HalfStep}+${RelaxSteps}-v_Counter)*0.001*${LoadSpeed}
+run                 ${HalfStep} pre no

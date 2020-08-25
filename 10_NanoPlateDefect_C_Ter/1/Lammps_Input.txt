@@ -1,0 +1,101 @@
+###### Lammps Input File			Summer 2018
+###### AKA Group
+####################################################################################
+
+###### Variables Needed for Run
+
+variable			Temp			equal	1
+
+# Size variables *** Accual size will be multiplied by 2 due to axial symmetry ***
+variable			SizeX			equal	10
+variable			SizeY			equal	10
+variable			SizeZ			equal	2
+variable			HalfSizeX		equal	0.5*${SizeX}
+variable			HalfSizeY		equal	0.5*${SizeY}
+variable			DeleteCylinder	equal	3
+variable			CellSize		equal	3.57
+variable			Mass			equal	12.011
+#variable			AtomVolume		equal	(${CellSize}^3)/8
+variable			AtomVolume		equal	vol/atoms
+
+# Run variables
+variable			TimeStep		equal	0.001
+variable			StrainRate		equal	1e-3
+variable			FinalStrain		equal	0.5
+variable			RunValue		equal	${FinalStrain}/(${StrainRate}*${TimeStep})
+variable			ThermoValue		equal	1000
+variable			DumpValue		equal	1000
+
+# Minimize variables
+variable			etol			equal	1e-20
+variable			ftol			equal	1e-20
+variable			maxiter			equal	1e+5
+variable			maxeval			equal	1e+5
+
+
+##################################### Main Code #####################################
+
+###### Initializations
+units				metal
+dimension			3
+boundary			p p s
+atom_style			atomic
+
+###### Create Atoms
+box					tilt large
+lattice				diamond ${CellSize}
+region				MainRegion prism -${SizeX} +${SizeX} -${SizeY} +${SizeY} -${SizeZ} +${SizeZ} 0.0 0.0 0.0 units lattice
+region				DeleteRegion1 cylinder z -${HalfSizeX} -${HalfSizeY} ${DeleteCylinder} -${SizeZ} +${SizeZ} units lattice
+region				DeleteRegion2 cylinder z +${HalfSizeX} -${HalfSizeY} ${DeleteCylinder} -${SizeZ} +${SizeZ} units lattice
+region				DeleteRegion3 cylinder z +${HalfSizeX} +${HalfSizeY} ${DeleteCylinder} -${SizeZ} +${SizeZ} units lattice
+region				DeleteRegion4 cylinder z -${HalfSizeX} +${HalfSizeY} ${DeleteCylinder} -${SizeZ} +${SizeZ} units lattice
+create_box			1 MainRegion
+create_atoms		1 box
+delete_atoms		region DeleteRegion1
+delete_atoms		region DeleteRegion2
+delete_atoms		region DeleteRegion3
+delete_atoms		region DeleteRegion4
+
+###### Potential
+mass				1 ${Mass}
+pair_style			tersoff
+pair_coeff			* * C1.tersoff C
+
+###### Minimization
+min_style			quickmin
+minimize			${etol} ${ftol} ${maxiter} ${maxeval}
+
+###### Initil Velocity
+velocity			all create ${Temp} 123456 rot yes mom yes dist gaussian
+
+###### Fixes
+fix					NVTFix all nvt temp ${Temp} ${Temp} 0.01
+fix					FixDeform all deform 1 x erate ${StrainRate} y erate ${StrainRate} units box remap x
+
+###### Computes
+variable			CurrentStrain	equal	step*${StrainRate}*${TimeStep}
+
+# Stress vectors
+compute				SPA all stress/atom NULL
+variable			SPAV1			atom	c_SPA[1]/(${AtomVolume}*10000)
+variable			SPAV2			atom	c_SPA[2]/(${AtomVolume}*10000)
+variable			SPAV3			atom	c_SPA[3]/(${AtomVolume}*10000)
+
+# System pressure
+compute				PRS all pressure thermo_temp
+variable			PRSxx			equal	c_PRS[1]/10000
+variable			PRSyy			equal	c_PRS[2]/10000
+variable			PRSzz			equal	c_PRS[3]/10000
+
+# Bulk mudulus
+#compute				RSPA all reduce sum c_SPA[1] c_SPA[2] c_SPA[3]
+#variable			TotalPressure	equal	-(c_RSPA[1]+c_RSPA[2]+c_RSPA[3])/(3*vol*10000)
+#variable			DVoverV0		equal	1-(1-v_CurrentStrain)^3
+#variable			BulkModulus		equal	v_TotalPressure/v_DVoverV0
+
+###### Dump and Thermo and Run
+fix					FixPrint all print ${ThermoValue} "${CurrentStrain} ${PRSxx} ${PRSyy} ${PRSzz}" file Stress.dat screen yes title "Strain Pxx Pyy Pzz   :::   System Stress(Pressure) GPa"
+
+dump				DumpFile all custom ${DumpValue} dump.Lammps x y z v_SPAV1 v_SPAV2 v_SPAV3
+
+run					${RunValue}
